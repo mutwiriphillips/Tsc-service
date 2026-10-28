@@ -20,6 +20,10 @@ The product ships with **no sample data**. It starts with reference data only (r
 | Teacher Portal | A separate identity. Teachers see their own record, ask for transfers and corrections, and download everything held about them. |
 | Audit Trail | Every action logged; the database refuses edits and deletes; entries are hash-chained so tampering is detectable. |
 
+## The home page and the TSC logo
+
+The address opens on a public landing page with the two sign-in doors. The official logo is TSC property; the copy provided is in place and is saved as `frontend/public/brand/tsc-logo.png`; replace it with TSC master artwork (PNG or SVG) when available, then run `npm run build` in `frontend/`.
+
 ## How it runs
 
 One Node.js process serves both the API (`/api/...`) and the web pages, on one address, backed by PostgreSQL. Nothing else is required:

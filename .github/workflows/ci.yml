@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: tsc
+          POSTGRES_PASSWORD: tsc_dev_pw
+          POSTGRES_DB: tsc_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U tsc" --health-interval 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      TEST_DATABASE_URL: postgresql://tsc:tsc_dev_pw@localhost:5432/tsc_test?schema=public
+      DATABASE_URL: postgresql://tsc:tsc_dev_pw@localhost:5432/tsc_test?schema=public
+      JWT_OFFICER_SECRET: ci-officer-secret-0123456789abcdef0123456789
+      JWT_TEACHER_SECRET: ci-teacher-secret-0123456789abcdef0123456789
+      DATA_ENCRYPTION_KEY: '1111111111111111111111111111111111111111111111111111111111111111'
+      NATIONAL_ID_PEPPER: ci-pepper-0123456789abcdef
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - run: npm ci
+      - name: Migrations match the schema (no drift)
+        run: |
+          npx prisma migrate deploy
+          npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code
+      - name: 1. Syntax and wiring
+        run: npm run check
+      - name: 2–3. Unit tests, access control and live endpoints
+        run: npm test
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: 4. Production build
+        run: npm run build
