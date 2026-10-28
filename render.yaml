@@ -1,0 +1,56 @@
+# Render Blueprint — trial deployment of TSC TMGS.
+# One web service (API + web pages on one address) and one PostgreSQL database.
+# In Render: New > Blueprint > pick this repository. Render asks for the two
+# BOOTSTRAP_ADMIN values marked `sync: false`; everything else is set here or generated.
+#
+# Trial only: Render hosts outside Kenya. Use test data, not real teacher records
+# (see docs/RENDER.md).
+
+databases:
+  - name: tsc-tmgs-db
+    plan: free
+    region: frankfurt
+    databaseName: tsc_tmgs
+    user: tsc
+    postgresMajorVersion: "16"
+
+services:
+  - type: web
+    name: tsc-tmgs
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm ci --prefix frontend && npm run build --prefix frontend && npm ci --prefix backend
+    startCommand: cd backend && npx prisma migrate deploy && node prisma/seed.js && node src/server.js
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: tsc-tmgs-db
+          property: connectionString
+      # Secrets: generated once by Render, kept across deploys.
+      - key: JWT_OFFICER_SECRET
+        generateValue: true
+      - key: JWT_TEACHER_SECRET
+        generateValue: true
+      - key: DATA_ENCRYPTION_KEY
+        generateValue: true
+      - key: NATIONAL_ID_PEPPER
+        generateValue: true
+      - key: MFA_REQUIRED
+        value: "true"
+      # The compliance scan runs inside the app; it catches up whenever the service wakes.
+      - key: RULES_INTERVAL_HOURS
+        value: "24"
+      # First National Admin, created only while the database has no officers.
+      - key: BOOTSTRAP_ADMIN_EMAIL
+        sync: false
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
+      - key: BOOTSTRAP_ADMIN_NAME
+        value: National Administrator

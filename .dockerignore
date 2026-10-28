@@ -1,0 +1,7 @@
+**/node_modules
+**/.next
+frontend/out
+**/.env
+**/.env.local
+.git
+tests-e2e

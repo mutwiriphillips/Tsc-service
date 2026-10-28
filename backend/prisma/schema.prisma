@@ -1,0 +1,442 @@
+// TSC Teacher Management & Governance System — data model
+// Doctrine: the system is an evidence layer. It records and reports;
+// decisions about people are always taken by a named officer.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Connection URL lives in prisma.config.ts (Prisma 7)
+}
+
+// ───────────────────────── Geography & institutions ─────────────────────────
+
+model Region {
+  id       String   @id @default(cuid())
+  code     String   @unique
+  name     String
+  counties County[]
+  officers Officer[]
+}
+
+model County {
+  id          String      @id @default(cuid())
+  code        String      @unique // "01".."47"
+  name        String
+  regionId    String
+  region      Region      @relation(fields: [regionId], references: [id])
+  subCounties SubCounty[]
+  officers    Officer[]
+
+  @@index([regionId])
+}
+
+model SubCounty {
+  id       String    @id @default(cuid())
+  name     String
+  countyId String
+  county   County    @relation(fields: [countyId], references: [id])
+  schools  School[]
+  officers Officer[]
+
+  @@unique([countyId, name])
+  @@index([countyId])
+}
+
+enum SchoolLevel {
+  PRIMARY
+  JUNIOR_SCHOOL
+  SECONDARY
+  TEACHER_TRAINING
+  SPECIAL_NEEDS
+}
+
+model School {
+  id             String           @id @default(cuid())
+  code           String           @unique
+  name           String
+  level          SchoolLevel
+  subCountyId    String
+  subCounty      SubCounty        @relation(fields: [subCountyId], references: [id])
+  establishment  Int // approved teaching posts
+  postings       Posting[]
+  vacancies      Vacancy[]
+  documents      Document[]
+  visits         FieldVisit[]
+  flags          ComplianceFlag[]
+  appraisals     AppraisalReturn[]
+  csoAssignments CsoAssignment[]
+  heads          Officer[]        @relation("HeadOfSchool")
+  createdAt      DateTime         @default(now())
+
+  @@index([subCountyId])
+}
+
+// ───────────────────────── Officers (staff identity) ─────────────────────────
+
+enum OfficerRole {
+  NATIONAL_ADMIN
+  REGIONAL_DIRECTOR
+  COUNTY_DIRECTOR
+  SUBCOUNTY_DIRECTOR
+  CSO // Curriculum Support Officer
+  HEAD_OF_INSTITUTION
+}
+
+model Officer {
+  id           String      @id @default(cuid())
+  staffNumber  String      @unique
+  name         String
+  email        String      @unique
+  passwordHash String
+  role         OfficerRole
+  // Jurisdiction: exactly the field matching the role is set (enforced in code)
+  regionId     String?
+  region       Region?     @relation(fields: [regionId], references: [id])
+  countyId     String?
+  county       County?     @relation(fields: [countyId], references: [id])
+  subCountyId  String?
+  subCounty    SubCounty?  @relation(fields: [subCountyId], references: [id])
+  schoolId     String?
+  school       School?     @relation("HeadOfSchool", fields: [schoolId], references: [id])
+  mfaSecret    String? // encrypted at rest
+  mfaEnabled   Boolean     @default(false)
+  active       Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+
+  csoAssignments  CsoAssignment[]
+  visits          FieldVisit[]     @relation("VisitCso")
+  visitsApproved  FieldVisit[]     @relation("VisitApprover")
+  approvals       Approval[]
+  documents       Document[]       @relation("DocSubmitterOfficer")
+  postingsCreated Posting[]
+  overrides       ComplianceFlag[]
+}
+
+model CsoAssignment {
+  officerId String
+  officer   Officer @relation(fields: [officerId], references: [id])
+  schoolId  String
+  school    School  @relation(fields: [schoolId], references: [id])
+
+  @@id([officerId, schoolId])
+}
+
+// ───────────────────────── Teachers (separate identity) ─────────────────────────
+
+enum RegistrationStatus {
+  ACTIVE
+  PENDING
+  SUSPENDED
+  DEREGISTERED
+}
+
+model Teacher {
+  id                     String             @id @default(cuid())
+  tscNumber              String             @unique
+  // Data minimisation: the national ID is never stored in clear text.
+  // We keep a keyed hash, used only to verify portal registration.
+  nationalIdHash         String
+  firstName              String
+  lastName               String
+  gender                 String? // as recorded by TSC; used only for aggregate reporting
+  registrationStatus     RegistrationStatus @default(PENDING)
+  registeredAt           DateTime?
+  personnelFileComplete  Boolean            @default(false)
+  portalPasswordHash     String?
+  portalActivatedAt      DateTime?
+  createdAt              DateTime           @default(now())
+
+  postings          Posting[]
+  appraisals        AppraisalReturn[]
+  documents         Document[]
+  cases             DisciplinaryCase[]
+  sensitiveRecords  SensitiveRecord[]
+  correctionRequests CorrectionRequest[]
+}
+
+// Walled-off sensitive data (health, disability, disciplinary notes).
+// Content is AES-256-GCM encrypted; readable only by County Director and National Admin.
+enum SensitiveKind {
+  HEALTH
+  DISABILITY
+  DISCIPLINARY_NOTE
+}
+
+model SensitiveRecord {
+  id          String        @id @default(cuid())
+  teacherId   String
+  teacher     Teacher       @relation(fields: [teacherId], references: [id])
+  kind        SensitiveKind
+  ciphertext  String
+  createdById String
+  createdAt   DateTime      @default(now())
+
+  @@index([teacherId])
+}
+
+// ───────────────────────── Staffing ledger ─────────────────────────
+
+enum PostingType {
+  SUBSTANTIVE
+  ACTING
+}
+
+enum PostingStatus {
+  ACTIVE
+  ENDED
+}
+
+model Posting {
+  id          String        @id @default(cuid())
+  teacherId   String
+  teacher     Teacher       @relation(fields: [teacherId], references: [id])
+  schoolId    String
+  school      School        @relation(fields: [schoolId], references: [id])
+  type        PostingType   @default(SUBSTANTIVE)
+  designation String // e.g. "Teacher", "Deputy Principal (Acting)"
+  startDate   DateTime
+  endDate     DateTime?
+  status      PostingStatus @default(ACTIVE)
+  endReason   String?
+  createdById String
+  createdBy   Officer       @relation(fields: [createdById], references: [id])
+  createdAt   DateTime      @default(now())
+  vacancy     Vacancy?
+
+  @@index([teacherId, status])
+  @@index([schoolId, status])
+}
+
+model Vacancy {
+  id          String    @id @default(cuid())
+  schoolId    String
+  school      School    @relation(fields: [schoolId], references: [id])
+  designation String
+  openedAt    DateTime
+  filledAt    DateTime?
+  postingId   String?   @unique
+  posting     Posting?  @relation(fields: [postingId], references: [id])
+
+  @@index([schoolId])
+}
+
+model AppraisalReturn {
+  id          String   @id @default(cuid())
+  teacherId   String
+  teacher     Teacher  @relation(fields: [teacherId], references: [id])
+  schoolId    String
+  school      School   @relation(fields: [schoolId], references: [id])
+  year        Int
+  term        Int // 1..3
+  complete    Boolean  @default(true)
+  submittedAt DateTime @default(now())
+  source      String   @default("manual") // manual | import
+
+  @@unique([teacherId, year, term])
+  @@index([schoolId, year, term])
+}
+
+model DisciplinaryCase {
+  id        String    @id @default(cuid())
+  teacherId String
+  teacher   Teacher   @relation(fields: [teacherId], references: [id])
+  schoolId  String
+  caseType  String
+  openedAt  DateTime
+  closedAt  DateTime?
+  status    String    @default("OPEN") // OPEN | CLOSED
+
+  @@index([schoolId])
+}
+
+// ───────────────────────── Documents & two-tier approval ─────────────────────────
+
+enum DocumentType {
+  APPOINTMENT_LETTER
+  TRANSFER_REQUEST
+  PROMOTION_FILE
+  APPRAISAL_RETURN
+  OTHER
+}
+
+enum DocumentStatus {
+  SUBMITTED // awaiting sub-county review
+  SUBCOUNTY_REVIEWED // awaiting county sign-off
+  COUNTY_APPROVED // final, except promotion files
+  NATIONAL_APPROVED // final for promotion files
+  REJECTED
+}
+
+model Document {
+  id                     String         @id @default(cuid())
+  type                   DocumentType
+  title                  String
+  schoolId               String
+  school                 School         @relation(fields: [schoolId], references: [id])
+  teacherId              String?
+  teacher                Teacher?       @relation(fields: [teacherId], references: [id])
+  fileName               String?
+  storageKey             String?
+  meta                   Json?
+  status                 DocumentStatus @default(SUBMITTED)
+  submittedByOfficerId   String?
+  submittedByOfficer     Officer?       @relation("DocSubmitterOfficer", fields: [submittedByOfficerId], references: [id])
+  submittedByTeacher     Boolean        @default(false)
+  submittedAt            DateTime       @default(now())
+  decidedAt              DateTime?
+  approvals              Approval[]
+  file                   DocumentFile?
+
+  @@index([schoolId, status])
+  @@index([teacherId])
+}
+
+// The scanned file itself, stored in the database: no dependency on a local disk,
+// and it is covered by the same backups as the rest of the record.
+model DocumentFile {
+  documentId  String   @id
+  document    Document @relation(fields: [documentId], references: [id])
+  contentType String
+  sizeBytes   Int
+  sha256      String
+  bytes       Bytes
+  uploadedAt  DateTime @default(now())
+}
+
+enum ApprovalTier {
+  SUBCOUNTY
+  COUNTY
+  NATIONAL
+}
+
+enum ApprovalDecision {
+  APPROVED
+  REJECTED
+}
+
+model Approval {
+  id         String           @id @default(cuid())
+  documentId String
+  document   Document         @relation(fields: [documentId], references: [id])
+  tier       ApprovalTier
+  decision   ApprovalDecision
+  officerId  String
+  officer    Officer          @relation(fields: [officerId], references: [id])
+  reason     String?
+  at         DateTime         @default(now())
+
+  @@unique([documentId, tier])
+}
+
+// ───────────────────────── Field quality assurance ─────────────────────────
+
+enum VisitStatus {
+  PLANNED
+  APPROVED
+  COMPLETED
+  CANCELLED
+}
+
+model FieldVisit {
+  id           String      @id @default(cuid())
+  csoId        String
+  cso          Officer     @relation("VisitCso", fields: [csoId], references: [id])
+  schoolId     String
+  school       School      @relation(fields: [schoolId], references: [id])
+  plannedDate  DateTime
+  purpose      String
+  status       VisitStatus @default(PLANNED)
+  approvedById String?
+  approvedBy   Officer?    @relation("VisitApprover", fields: [approvedById], references: [id])
+  report       String?
+  completedAt  DateTime?
+  createdAt    DateTime    @default(now())
+
+  @@index([schoolId])
+  @@index([csoId])
+}
+
+// ───────────────────────── Compliance rules ─────────────────────────
+
+enum FlagStatus {
+  OPEN
+  RESOLVED
+  OVERRIDDEN
+}
+
+enum FlagSeverity {
+  WARNING // approaching a limit
+  BREACH // limit passed — action required
+}
+
+model ComplianceFlag {
+  id             String       @id @default(cuid())
+  dedupeKey      String       @unique // rule + entity, so a re-run updates instead of duplicating
+  rule           String
+  severity       FlagSeverity
+  status         FlagStatus   @default(OPEN)
+  label          String // e.g. "Term Expiring", "Overdue — Action Required"
+  message        String
+  schoolId       String?
+  school         School?      @relation(fields: [schoolId], references: [id])
+  teacherId      String?
+  entityType     String
+  entityId       String
+  raisedAt       DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  resolvedAt     DateTime?
+  overriddenById String?
+  overriddenBy   Officer?     @relation(fields: [overriddenById], references: [id])
+  overrideReason String?
+
+  @@index([schoolId, status])
+  @@index([rule, status])
+}
+
+// Rule thresholds are configuration, not code. `confirmed` stays false until
+// TSC confirms the value against current policy.
+model RuleConfig {
+  key         String   @id
+  value       Json
+  description String
+  confirmed   Boolean  @default(false)
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+}
+
+// ───────────────────────── Data-subject rights ─────────────────────────
+
+model CorrectionRequest {
+  id         String    @id @default(cuid())
+  teacherId  String
+  teacher    Teacher   @relation(fields: [teacherId], references: [id])
+  field      String
+  requested  String
+  status     String    @default("OPEN") // OPEN | ACCEPTED | DECLINED
+  response   String?
+  createdAt  DateTime  @default(now())
+  resolvedAt DateTime?
+}
+
+// ───────────────────────── Audit trail ─────────────────────────
+// Append-only: UPDATE and DELETE are blocked by a database trigger (see migration),
+// and each row carries a hash of the previous row, so tampering is detectable.
+
+model AuditEvent {
+  id         BigInt   @id @default(autoincrement())
+  at         DateTime @default(now())
+  actorType  String // OFFICER | TEACHER | SYSTEM
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String?
+  detail     Json?
+  prevHash   String
+  hash       String   @unique
+
+  @@index([entityType, entityId])
+  @@index([actorId])
+}

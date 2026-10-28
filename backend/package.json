@@ -1,0 +1,51 @@
+{
+  "name": "tsc-tmgs-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TSC Teacher Management & Governance System - API",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "check": "node scripts/check-wiring.js",
+    "test": "jest --runInBand",
+    "db:migrate": "prisma migrate deploy",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:seed": "node prisma/seed.js",
+    "rules:run": "node scripts/run-rules.js",
+    "postinstall": "prisma generate",
+    "db:reset:local": "./scripts/db-reset-local.sh",
+    "db:drift": "prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code",
+    "fixtures:load": "node tests/fixtures/load.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testTimeout": 30000,
+    "setupFiles": [
+      "<rootDir>/tests/setup-env.js"
+    ],
+    "globalSetup": "<rootDir>/tests/global-setup.js"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.10.1",
+    "@prisma/client": "^7.10.1",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "csv-parse": "^7.0.3",
+    "dotenv": "^18.0.9",
+    "express": "^4.22.3",
+    "express-rate-limit": "^8.7.1",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.23.1",
+    "zod": "^4.6.7",
+    "prisma": "^7.10.1"
+  },
+  "devDependencies": {
+    "jest": "^30.5.2",
+    "supertest": "^7.3.1"
+  }
+}

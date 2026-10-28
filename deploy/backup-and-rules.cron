@@ -1,0 +1,9 @@
+# Install with: crontab deploy/backup-and-rules.cron   (adjust /srv/tsc-tmgs to the install path)
+# Times are server local time; set the host to Africa/Nairobi.
+
+# 02:00 — nightly compliance scan: raises, refreshes and resolves flags.
+0 2 * * * cd /srv/tsc-tmgs && docker compose exec -T app node scripts/run-rules.js >> /var/log/tsc-rules.log 2>&1
+
+# 01:00 — database backup, kept 30 days. Copy /srv/backups off the host as well.
+0 1 * * * cd /srv/tsc-tmgs && docker compose exec -T db pg_dump -U tsc -Fc tsc_tmgs > /srv/backups/tsc_tmgs_$(date +\%F).dump && find /srv/backups -name 'tsc_tmgs_*.dump' -mtime +30 -delete
+

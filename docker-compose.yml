@@ -1,0 +1,50 @@
+# One-host deployment: PostgreSQL, the app (API + web on one port), and nginx for TLS.
+# Copy .env.example to .env, fill it with deploy/generate-secrets.sh, then:
+#   docker compose up -d --build
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tsc
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: tsc_tmgs
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U tsc -d tsc_tmgs']
+      interval: 10s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://tsc:${POSTGRES_PASSWORD}@db:5432/tsc_tmgs?schema=public
+      NODE_ENV: production
+      JWT_OFFICER_SECRET: ${JWT_OFFICER_SECRET:?generate with deploy/generate-secrets.sh}
+      JWT_TEACHER_SECRET: ${JWT_TEACHER_SECRET:?generate with deploy/generate-secrets.sh}
+      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:?generate with deploy/generate-secrets.sh}
+      NATIONAL_ID_PEPPER: ${NATIONAL_ID_PEPPER:?generate with deploy/generate-secrets.sh}
+      MFA_REQUIRED: 'true'
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:-}
+
+  nginx:
+    image: nginx:1.27
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/certs:/etc/nginx/certs:ro
+
+volumes:
+  pgdata:
